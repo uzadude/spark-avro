@@ -22,7 +22,7 @@ import java.util.zip.Deflater
 
 import scala.util.control.NonFatal
 
-import com.databricks.spark.avro.DefaultSource.{AvroSchema, IgnoreFilesWithoutExtensionProperty, SerializableConfiguration}
+import com.databricks.spark.avro.DefaultSource.{AvroSchema, AvroSchemaUrl, IgnoreFilesWithoutExtensionProperty, SerializableConfiguration}
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
 import com.esotericsoftware.kryo.io.{Input, Output}
 import org.apache.avro.{Schema, SchemaBuilder}
@@ -31,7 +31,7 @@ import org.apache.avro.generic.{GenericDatumReader, GenericRecord}
 import org.apache.avro.mapred.{AvroOutputFormat, FsInput}
 import org.apache.avro.mapreduce.AvroJob
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{FileStatus, Path}
+import org.apache.hadoop.fs.{FileStatus, Path, FileSystem}
 import org.apache.hadoop.mapreduce.Job
 import org.slf4j.LoggerFactory
 
@@ -73,8 +73,19 @@ private[avro] class DefaultSource extends FileFormat with DataSourceRegister {
       }
     }
 
+    val avroUrlSchema = options.get(AvroSchemaUrl).map(schemaFSUrl => {
+      log.info("loading schema from url: " + schemaFSUrl)
+      val fs = FileSystem.get(new URI(schemaFSUrl), conf)
+      val in = fs.open(new Path(schemaFSUrl))
+      try {
+        new Schema.Parser().parse(in)
+      } finally {
+        in.close()
+      }
+    })
+
     // User can specify an optional avro json schema.
-    val avroSchema = options.get(AvroSchema).map(new Schema.Parser().parse).getOrElse {
+    val avroSchema = avroUrlSchema.getOrElse(options.get(AvroSchema).map(new Schema.Parser().parse).getOrElse {
       val in = new FsInput(sampleFile.getPath, conf)
       try {
         val reader = DataFileReader.openReader(in, new GenericDatumReader[GenericRecord]())
@@ -86,7 +97,7 @@ private[avro] class DefaultSource extends FileFormat with DataSourceRegister {
       } finally {
         in.close()
       }
-    }
+    })
 
     SchemaConverters.toSqlType(avroSchema).dataType match {
       case t: StructType => Some(t)
@@ -241,6 +252,7 @@ private[avro] object DefaultSource {
   val IgnoreFilesWithoutExtensionProperty = "avro.mapred.ignore.inputs.without.extension"
 
   val AvroSchema = "avroSchema"
+  val AvroSchemaUrl = "avroSchemaUrl"
 
   class SerializableConfiguration(@transient var value: Configuration)
       extends Serializable with KryoSerializable {

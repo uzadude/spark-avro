@@ -531,6 +531,14 @@ class AvroSuite extends FunSuite with BeforeAndAfterAll {
     assert(result.sameElements(expected))
   }
 
+  test("support user provided avro schema url") {
+    val avroSchemaUrl = "src/test/resources/test_sub.avsc"
+    val result = spark.read.option(DefaultSource.AvroSchemaUrl, avroSchemaUrl).avro(testFile)
+      .collect()
+    val expected = spark.read.avro(testFile).select("string").collect()
+    assert(result.sameElements(expected))
+  }
+
   test("support user provided avro schema with defaults for missing fields") {
     val avroSchema =
       """
